@@ -34,6 +34,7 @@ services:
       DB_SSLMODE: ${DB_SSLMODE:-disable}
       APP_ENV: ${APP_ENV:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      TZ: ${TZ:-Europe/Moscow}
     env_file:
       - .env
     restart: unless-stopped
