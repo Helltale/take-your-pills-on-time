@@ -68,13 +68,28 @@ func (s *Scheduler) Stop() {
 }
 
 func (s *Scheduler) processReminders(ctx context.Context) {
+	now := time.Now()
 	reminders, err := s.reminderRepo.GetDueReminders(ctx)
 	if err != nil {
 		s.logger.Error("failed to get due reminders", zap.Error(err))
 		return
 	}
 
+	if len(reminders) > 0 {
+		s.logger.Info("processing reminders",
+			zap.Time("current_time", now),
+			zap.Int("found_count", len(reminders)),
+		)
+	}
+
 	for _, reminder := range reminders {
+		s.logger.Info("found due reminder",
+			zap.String("reminder_id", reminder.ID.String()),
+			zap.String("title", reminder.Title),
+			zap.String("type", string(reminder.Type)),
+			zap.Time("next_send_at", *reminder.NextSendAt),
+			zap.Time("current_time", now),
+		)
 		if err := s.sendReminder(ctx, reminder); err != nil {
 			s.logger.Error("failed to send reminder",
 				zap.Error(err),

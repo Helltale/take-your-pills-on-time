@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -212,6 +213,113 @@ func (h *BotHandler) handleStats(ctx context.Context, chatID int64, telegramUser
 }
 
 func (h *BotHandler) handleTextMessage(ctx context.Context, msg *tgbotapi.Message) {
+	text := strings.TrimSpace(msg.Text)
+	chatID := msg.Chat.ID
+	telegramUserID := int64(msg.From.ID)
+
+	if text == "/cancel" {
+		h.sendMessage(chatID, "Создание напоминания отменено.")
+		return
+	}
+
+	if !strings.Contains(text, "|") {
+		h.sendMessage(chatID, "Неверный формат. Используйте формат: Название|Тип|Комментарий|Время\nИли: Название|Тип\n\nДля отмены отправьте /cancel")
+		return
+	}
+
+	parts := strings.Split(text, "|")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+
+	if len(parts) < 2 {
+		h.sendMessage(chatID, "Неверный формат. Минимум требуется: Название|Тип")
+		return
+	}
+
+	title := parts[0]
+	reminderTypeStr := strings.ToLower(parts[1])
+
+	if title == "" {
+		h.sendMessage(chatID, "Ошибка: название не может быть пустым.")
+		return
+	}
+
+	var reminderType entities.ReminderType
+	switch reminderTypeStr {
+	case "daily":
+		reminderType = entities.ReminderTypeDaily
+	case "weekly":
+		reminderType = entities.ReminderTypeWeekly
+	case "custom":
+		reminderType = entities.ReminderTypeCustom
+	case "specific":
+		reminderType = entities.ReminderTypeSpecific
+	default:
+		h.sendMessage(chatID, fmt.Sprintf("Неизвестный тип напоминания: %s\nДоступные типы: daily, weekly, custom, specific", reminderTypeStr))
+		return
+	}
+
+	var comment *string
+	var timeOfDay *string
+	var intervalHours *int
+
+	if len(parts) >= 3 && parts[2] != "" {
+		comment = &parts[2]
+	}
+
+	if len(parts) >= 4 && parts[3] != "" {
+		if reminderType == entities.ReminderTypeCustom {
+			interval, err := strconv.Atoi(parts[3])
+			if err != nil || interval <= 0 {
+				h.sendMessage(chatID, "Ошибка: для типа 'custom' требуется положительное число часов.")
+				return
+			}
+			intervalHours = &interval
+		} else if reminderType == entities.ReminderTypeSpecific {
+			if _, err := time.Parse("15:04", parts[3]); err != nil {
+				h.sendMessage(chatID, "Ошибка: неверный формат времени. Используйте формат HH:MM (например, 09:00)")
+				return
+			}
+			timeOfDay = &parts[3]
+		} else {
+			if _, err := time.Parse("15:04", parts[3]); err == nil {
+				timeOfDay = &parts[3]
+			}
+		}
+	}
+
+	user, err := h.usecases.User.GetByTelegramID(ctx, telegramUserID)
+	if err != nil || user == nil {
+		h.sendMessage(chatID, "Ошибка: пользователь не найден. Попробуйте /start")
+		return
+	}
+
+	reminder, err := h.usecases.Reminder.Create(ctx, user.ID, title, comment, nil, reminderType, intervalHours, timeOfDay)
+	if err != nil {
+		h.logger.Error("failed to create reminder", zap.Error(err), zap.Int64("user_id", telegramUserID))
+		h.sendMessage(chatID, fmt.Sprintf("Ошибка при создании напоминания: %s", err.Error()))
+		return
+	}
+
+	var responseBuilder strings.Builder
+	responseBuilder.WriteString("✅ Напоминание успешно создано!\n\n")
+	responseBuilder.WriteString(fmt.Sprintf("📝 Название: %s\n", reminder.Title))
+	responseBuilder.WriteString(fmt.Sprintf("🔄 Тип: %s\n", reminder.Type))
+	if reminder.Comment != nil {
+		responseBuilder.WriteString(fmt.Sprintf("💬 Комментарий: %s\n", *reminder.Comment))
+	}
+	if reminder.TimeOfDay != nil {
+		responseBuilder.WriteString(fmt.Sprintf("⏰ Время: %s\n", *reminder.TimeOfDay))
+	}
+	if reminder.IntervalHours != nil {
+		responseBuilder.WriteString(fmt.Sprintf("⏱ Интервал: %d часов\n", *reminder.IntervalHours))
+	}
+	if reminder.NextSendAt != nil {
+		responseBuilder.WriteString(fmt.Sprintf("📅 Следующая отправка: %s\n", reminder.NextSendAt.Format("02.01.2006 15:04")))
+	}
+
+	h.sendMessage(chatID, responseBuilder.String())
 }
 
 func (h *BotHandler) handleCallbackQuery(ctx context.Context, callback *tgbotapi.CallbackQuery) {
