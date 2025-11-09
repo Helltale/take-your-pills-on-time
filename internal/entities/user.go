@@ -7,15 +7,15 @@ import (
 )
 
 type User struct {
-	ID           uuid.UUID `db:"id" json:"id"`
-	TelegramID   int64     `db:"telegram_id" json:"telegram_id"`
-	Username     *string   `db:"username" json:"username"`
-	FirstName    string    `db:"first_name" json:"first_name"`
-	LastName     *string   `db:"last_name" json:"last_name"`
-	LanguageCode *string   `db:"language_code" json:"language_code"`
-	IsActive     bool      `db:"is_active" json:"is_active"`
-	CreatedAt    time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt    time.Time `db:"updated_at" json:"updated_at"`
+	ID           uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	TelegramID   int64     `gorm:"uniqueIndex;not null" json:"telegram_id"`
+	Username     *string   `gorm:"size:255" json:"username"`
+	FirstName    string    `gorm:"size:255;not null" json:"first_name"`
+	LastName     *string   `gorm:"size:255" json:"last_name"`
+	LanguageCode *string   `gorm:"size:10" json:"language_code"`
+	IsActive     bool      `gorm:"default:true;not null;index" json:"is_active"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 func (User) TableName() string {

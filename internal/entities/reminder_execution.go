@@ -15,13 +15,13 @@ const (
 )
 
 type ReminderExecution struct {
-	ID          uuid.UUID       `db:"id" json:"id"`
-	ReminderID  uuid.UUID       `db:"reminder_id" json:"reminder_id"`
-	UserID      uuid.UUID       `db:"user_id" json:"user_id"`
-	Status      ExecutionStatus `db:"status" json:"status"`
-	SentAt      time.Time       `db:"sent_at" json:"sent_at"`
-	ConfirmedAt *time.Time      `db:"confirmed_at" json:"confirmed_at"`
-	CreatedAt   time.Time       `db:"created_at" json:"created_at"`
+	ID          uuid.UUID       `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	ReminderID  uuid.UUID       `gorm:"type:uuid;not null;index" json:"reminder_id"`
+	UserID      uuid.UUID       `gorm:"type:uuid;not null;index" json:"user_id"`
+	Status      ExecutionStatus `gorm:"type:varchar(50);not null;index" json:"status"`
+	SentAt      time.Time       `gorm:"not null;index" json:"sent_at"`
+	ConfirmedAt *time.Time      `json:"confirmed_at"`
+	CreatedAt   time.Time       `json:"created_at"`
 }
 
 func (ReminderExecution) TableName() string {

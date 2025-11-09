@@ -24,8 +24,5 @@ WORKDIR /root/
 # Copy the binary from builder
 COPY --from=builder /app/bin/bot .
 
-# Copy migrations
-COPY --from=builder /app/migrations ./migrations
-
 CMD ["./bot"]
 

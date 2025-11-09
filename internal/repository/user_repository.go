@@ -2,11 +2,10 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jmoiron/sqlx"
+	"gorm.io/gorm"
 
 	"github.com/Helltale/take-your-pills-on-time/internal/entities"
 )
@@ -20,34 +19,26 @@ type UserRepository interface {
 }
 
 type userRepository struct {
-	db *sqlx.DB
+	db *gorm.DB
 }
 
-func NewUserRepository(db *sqlx.DB) UserRepository {
+func NewUserRepository(db *gorm.DB) UserRepository {
 	return &userRepository{db: db}
 }
 
 func (r *userRepository) Create(ctx context.Context, user *entities.User) error {
-	query := `
-		INSERT INTO users (id, telegram_id, username, first_name, last_name, language_code, is_active, created_at, updated_at)
-		VALUES (:id, :telegram_id, :username, :first_name, :last_name, :language_code, :is_active, :created_at, :updated_at)
-	`
-
 	now := time.Now()
 	user.ID = uuid.New()
 	user.CreatedAt = now
 	user.UpdatedAt = now
 
-	_, err := r.db.NamedExecContext(ctx, query, user)
-	return err
+	return r.db.WithContext(ctx).Create(user).Error
 }
 
 func (r *userRepository) GetByTelegramID(ctx context.Context, telegramID int64) (*entities.User, error) {
 	var user entities.User
-	query := `SELECT * FROM users WHERE telegram_id = $1`
-
-	err := r.db.GetContext(ctx, &user, query, telegramID)
-	if err == sql.ErrNoRows {
+	err := r.db.WithContext(ctx).Where("telegram_id = ?", telegramID).First(&user).Error
+	if err == gorm.ErrRecordNotFound {
 		return nil, nil
 	}
 	if err != nil {
@@ -59,10 +50,8 @@ func (r *userRepository) GetByTelegramID(ctx context.Context, telegramID int64) 
 
 func (r *userRepository) GetByID(ctx context.Context, id uuid.UUID) (*entities.User, error) {
 	var user entities.User
-	query := `SELECT * FROM users WHERE id = $1`
-
-	err := r.db.GetContext(ctx, &user, query, id)
-	if err == sql.ErrNoRows {
+	err := r.db.WithContext(ctx).First(&user, "id = ?", id).Error
+	if err == gorm.ErrRecordNotFound {
 		return nil, nil
 	}
 	if err != nil {
@@ -73,20 +62,15 @@ func (r *userRepository) GetByID(ctx context.Context, id uuid.UUID) (*entities.U
 }
 
 func (r *userRepository) Update(ctx context.Context, user *entities.User) error {
-	query := `
-		UPDATE users 
-		SET username = :username, first_name = :first_name, last_name = :last_name, 
-		    language_code = :language_code, is_active = :is_active, updated_at = :updated_at
-		WHERE id = :id
-	`
-
 	user.UpdatedAt = time.Now()
-	_, err := r.db.NamedExecContext(ctx, query, user)
-	return err
+	return r.db.WithContext(ctx).Save(user).Error
 }
 
 func (r *userRepository) SetActive(ctx context.Context, telegramID int64, isActive bool) error {
-	query := `UPDATE users SET is_active = $1, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = $2`
-	_, err := r.db.ExecContext(ctx, query, isActive, telegramID)
-	return err
+	return r.db.WithContext(ctx).Model(&entities.User{}).
+		Where("telegram_id = ?", telegramID).
+		Updates(map[string]interface{}{
+			"is_active":  isActive,
+			"updated_at": time.Now(),
+		}).Error
 }

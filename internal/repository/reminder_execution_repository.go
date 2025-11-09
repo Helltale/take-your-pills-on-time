@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jmoiron/sqlx"
+	"gorm.io/gorm"
 
 	"github.com/Helltale/take-your-pills-on-time/internal/entities"
 )
@@ -27,34 +27,34 @@ type ExecutionStatistics struct {
 }
 
 type reminderExecutionRepository struct {
-	db *sqlx.DB
+	db *gorm.DB
 }
 
-func NewReminderExecutionRepository(db *sqlx.DB) ReminderExecutionRepository {
+func NewReminderExecutionRepository(db *gorm.DB) ReminderExecutionRepository {
 	return &reminderExecutionRepository{db: db}
 }
 
 func (r *reminderExecutionRepository) Create(ctx context.Context, execution *entities.ReminderExecution) error {
-	query := `
-		INSERT INTO reminder_executions (id, reminder_id, user_id, status, sent_at, confirmed_at, created_at)
-		VALUES (:id, :reminder_id, :user_id, :status, :sent_at, :confirmed_at, :created_at)
-	`
-
 	execution.ID = uuid.New()
 	execution.CreatedAt = time.Now()
 	if execution.SentAt.IsZero() {
 		execution.SentAt = time.Now()
 	}
 
-	_, err := r.db.NamedExecContext(ctx, query, execution)
-	return err
+	return r.db.WithContext(ctx).Create(execution).Error
 }
 
 func (r *reminderExecutionRepository) GetByReminderID(ctx context.Context, reminderID uuid.UUID, limit int) ([]*entities.ReminderExecution, error) {
 	var executions []*entities.ReminderExecution
-	query := `SELECT * FROM reminder_executions WHERE reminder_id = $1 ORDER BY sent_at DESC LIMIT $2`
+	query := r.db.WithContext(ctx).
+		Where("reminder_id = ?", reminderID).
+		Order("sent_at DESC")
 
-	err := r.db.SelectContext(ctx, &executions, query, reminderID, limit)
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+
+	err := query.Find(&executions).Error
 	if err != nil {
 		return nil, err
 	}
@@ -64,9 +64,15 @@ func (r *reminderExecutionRepository) GetByReminderID(ctx context.Context, remin
 
 func (r *reminderExecutionRepository) GetByUserID(ctx context.Context, userID uuid.UUID, limit int) ([]*entities.ReminderExecution, error) {
 	var executions []*entities.ReminderExecution
-	query := `SELECT * FROM reminder_executions WHERE user_id = $1 ORDER BY sent_at DESC LIMIT $2`
+	query := r.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Order("sent_at DESC")
 
-	err := r.db.SelectContext(ctx, &executions, query, userID, limit)
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+
+	err := query.Find(&executions).Error
 	if err != nil {
 		return nil, err
 	}
@@ -76,16 +82,16 @@ func (r *reminderExecutionRepository) GetByUserID(ctx context.Context, userID uu
 
 func (r *reminderExecutionRepository) GetStatisticsByUserID(ctx context.Context, userID uuid.UUID, fromDate, toDate time.Time) (*ExecutionStatistics, error) {
 	var stats ExecutionStatistics
-	query := `
-		SELECT 
+
+	err := r.db.WithContext(ctx).
+		Model(&entities.ReminderExecution{}).
+		Select(`
 			COUNT(*) FILTER (WHERE status = 'sent') as total_sent,
 			COUNT(*) FILTER (WHERE status = 'confirmed') as total_confirmed,
 			COUNT(*) FILTER (WHERE status = 'skipped') as total_skipped
-		FROM reminder_executions
-		WHERE user_id = $1 AND sent_at >= $2 AND sent_at <= $3
-	`
-
-	err := r.db.GetContext(ctx, &stats, query, userID, fromDate, toDate)
+		`).
+		Where("user_id = ? AND sent_at >= ? AND sent_at <= ?", userID, fromDate, toDate).
+		Scan(&stats).Error
 	if err != nil {
 		return nil, err
 	}
@@ -99,16 +105,16 @@ func (r *reminderExecutionRepository) GetStatisticsByUserID(ctx context.Context,
 
 func (r *reminderExecutionRepository) GetStatisticsByReminderID(ctx context.Context, reminderID uuid.UUID, fromDate, toDate time.Time) (*ExecutionStatistics, error) {
 	var stats ExecutionStatistics
-	query := `
-		SELECT 
+
+	err := r.db.WithContext(ctx).
+		Model(&entities.ReminderExecution{}).
+		Select(`
 			COUNT(*) FILTER (WHERE status = 'sent') as total_sent,
 			COUNT(*) FILTER (WHERE status = 'confirmed') as total_confirmed,
 			COUNT(*) FILTER (WHERE status = 'skipped') as total_skipped
-		FROM reminder_executions
-		WHERE reminder_id = $1 AND sent_at >= $2 AND sent_at <= $3
-	`
-
-	err := r.db.GetContext(ctx, &stats, query, reminderID, fromDate, toDate)
+		`).
+		Where("reminder_id = ? AND sent_at >= ? AND sent_at <= ?", reminderID, fromDate, toDate).
+		Scan(&stats).Error
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +127,15 @@ func (r *reminderExecutionRepository) GetStatisticsByReminderID(ctx context.Cont
 }
 
 func (r *reminderExecutionRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status entities.ExecutionStatus) error {
-	query := `UPDATE reminder_executions SET status = $1, confirmed_at = CURRENT_TIMESTAMP WHERE id = $2`
-	_, err := r.db.ExecContext(ctx, query, status, id)
-	return err
+	updates := map[string]interface{}{
+		"status": status,
+	}
+	if status == entities.ExecutionStatusConfirmed {
+		now := time.Now()
+		updates["confirmed_at"] = &now
+	}
+
+	return r.db.WithContext(ctx).Model(&entities.ReminderExecution{}).
+		Where("id = ?", id).
+		Updates(updates).Error
 }

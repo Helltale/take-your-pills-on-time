@@ -2,11 +2,10 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jmoiron/sqlx"
+	"gorm.io/gorm"
 
 	"github.com/Helltale/take-your-pills-on-time/internal/entities"
 )
@@ -24,36 +23,26 @@ type ReminderRepository interface {
 }
 
 type reminderRepository struct {
-	db *sqlx.DB
+	db *gorm.DB
 }
 
-func NewReminderRepository(db *sqlx.DB) ReminderRepository {
+func NewReminderRepository(db *gorm.DB) ReminderRepository {
 	return &reminderRepository{db: db}
 }
 
 func (r *reminderRepository) Create(ctx context.Context, reminder *entities.Reminder) error {
-	query := `
-		INSERT INTO reminders (id, user_id, title, comment, image_url, type, interval_hours, 
-		                      time_of_day, is_active, last_sent_at, next_send_at, created_at, updated_at)
-		VALUES (:id, :user_id, :title, :comment, :image_url, :type, :interval_hours, 
-		        :time_of_day, :is_active, :last_sent_at, :next_send_at, :created_at, :updated_at)
-	`
-
 	now := time.Now()
 	reminder.ID = uuid.New()
 	reminder.CreatedAt = now
 	reminder.UpdatedAt = now
 
-	_, err := r.db.NamedExecContext(ctx, query, reminder)
-	return err
+	return r.db.WithContext(ctx).Create(reminder).Error
 }
 
 func (r *reminderRepository) GetByID(ctx context.Context, id uuid.UUID) (*entities.Reminder, error) {
 	var reminder entities.Reminder
-	query := `SELECT * FROM reminders WHERE id = $1`
-
-	err := r.db.GetContext(ctx, &reminder, query, id)
-	if err == sql.ErrNoRows {
+	err := r.db.WithContext(ctx).First(&reminder, "id = ?", id).Error
+	if err == gorm.ErrRecordNotFound {
 		return nil, nil
 	}
 	if err != nil {
@@ -65,9 +54,10 @@ func (r *reminderRepository) GetByID(ctx context.Context, id uuid.UUID) (*entiti
 
 func (r *reminderRepository) GetByUserID(ctx context.Context, userID uuid.UUID) ([]*entities.Reminder, error) {
 	var reminders []*entities.Reminder
-	query := `SELECT * FROM reminders WHERE user_id = $1 ORDER BY created_at DESC`
-
-	err := r.db.SelectContext(ctx, &reminders, query, userID)
+	err := r.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Order("created_at DESC").
+		Find(&reminders).Error
 	if err != nil {
 		return nil, err
 	}
@@ -77,9 +67,10 @@ func (r *reminderRepository) GetByUserID(ctx context.Context, userID uuid.UUID) 
 
 func (r *reminderRepository) GetActiveByUserID(ctx context.Context, userID uuid.UUID) ([]*entities.Reminder, error) {
 	var reminders []*entities.Reminder
-	query := `SELECT * FROM reminders WHERE user_id = $1 AND is_active = true ORDER BY created_at DESC`
-
-	err := r.db.SelectContext(ctx, &reminders, query, userID)
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND is_active = ?", userID, true).
+		Order("created_at DESC").
+		Find(&reminders).Error
 	if err != nil {
 		return nil, err
 	}
@@ -90,16 +81,12 @@ func (r *reminderRepository) GetActiveByUserID(ctx context.Context, userID uuid.
 func (r *reminderRepository) GetDueReminders(ctx context.Context) ([]*entities.Reminder, error) {
 	var reminders []*entities.Reminder
 	now := time.Now()
-	query := `
-		SELECT r.* FROM reminders r
-		INNER JOIN users u ON r.user_id = u.id
-		WHERE r.is_active = true 
-		  AND u.is_active = true
-		  AND (r.next_send_at IS NULL OR r.next_send_at <= $1)
-		ORDER BY r.next_send_at ASC NULLS LAST
-	`
 
-	err := r.db.SelectContext(ctx, &reminders, query, now)
+	err := r.db.WithContext(ctx).
+		Joins("INNER JOIN users ON reminders.user_id = users.id").
+		Where("reminders.is_active = ? AND users.is_active = ? AND (reminders.next_send_at IS NULL OR reminders.next_send_at <= ?)", true, true, now).
+		Order("reminders.next_send_at ASC NULLS LAST").
+		Find(&reminders).Error
 	if err != nil {
 		return nil, err
 	}
@@ -108,33 +95,28 @@ func (r *reminderRepository) GetDueReminders(ctx context.Context) ([]*entities.R
 }
 
 func (r *reminderRepository) Update(ctx context.Context, reminder *entities.Reminder) error {
-	query := `
-		UPDATE reminders 
-		SET title = :title, comment = :comment, image_url = :image_url, type = :type,
-		    interval_hours = :interval_hours, time_of_day = :time_of_day, is_active = :is_active,
-		    last_sent_at = :last_sent_at, next_send_at = :next_send_at, updated_at = :updated_at
-		WHERE id = :id
-	`
-
 	reminder.UpdatedAt = time.Now()
-	_, err := r.db.NamedExecContext(ctx, query, reminder)
-	return err
+	return r.db.WithContext(ctx).Save(reminder).Error
 }
 
 func (r *reminderRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query := `DELETE FROM reminders WHERE id = $1`
-	_, err := r.db.ExecContext(ctx, query, id)
-	return err
+	return r.db.WithContext(ctx).Delete(&entities.Reminder{}, "id = ?", id).Error
 }
 
 func (r *reminderRepository) UpdateNextSendAt(ctx context.Context, id uuid.UUID, nextSendAt time.Time) error {
-	query := `UPDATE reminders SET next_send_at = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`
-	_, err := r.db.ExecContext(ctx, query, nextSendAt, id)
-	return err
+	return r.db.WithContext(ctx).Model(&entities.Reminder{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"next_send_at": nextSendAt,
+			"updated_at":   time.Now(),
+		}).Error
 }
 
 func (r *reminderRepository) UpdateLastSentAt(ctx context.Context, id uuid.UUID, lastSentAt time.Time) error {
-	query := `UPDATE reminders SET last_sent_at = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`
-	_, err := r.db.ExecContext(ctx, query, lastSentAt, id)
-	return err
+	return r.db.WithContext(ctx).Model(&entities.Reminder{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"last_sent_at": lastSentAt,
+			"updated_at":   time.Now(),
+		}).Error
 }

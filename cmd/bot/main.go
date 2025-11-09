@@ -9,15 +9,14 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
-	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
 	"go.uber.org/zap"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"github.com/Helltale/take-your-pills-on-time/internal/config"
 	"github.com/Helltale/take-your-pills-on-time/internal/handlers"
+	"github.com/Helltale/take-your-pills-on-time/internal/migrations"
 	"github.com/Helltale/take-your-pills-on-time/internal/repository"
 	"github.com/Helltale/take-your-pills-on-time/internal/scheduler"
 	"github.com/Helltale/take-your-pills-on-time/internal/usecases"
@@ -30,35 +29,41 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger := initLogger(cfg.App.LogLevel)
-	defer logger.Sync()
+	appLogger := initLogger(cfg.App.LogLevel)
+	defer appLogger.Sync()
 
-	logger.Info("Starting application", zap.String("env", cfg.App.Env))
+	appLogger.Info("Starting application", zap.String("env", cfg.App.Env))
 
-	db, err := connectDatabase(cfg.Database.DSN(), logger)
+	db, err := connectDatabase(cfg.Database.DSN(), cfg.App.LogLevel, appLogger)
 	if err != nil {
-		logger.Fatal("Failed to connect to database", zap.Error(err))
+		appLogger.Fatal("Failed to connect to database", zap.Error(err))
 	}
-	defer db.Close()
 
-	if err := runMigrations(cfg.Database.URL(), logger); err != nil {
-		logger.Fatal("Failed to run migrations", zap.Error(err))
+	sqlDB, err := db.DB()
+	if err != nil {
+		appLogger.Fatal("Failed to get sql.DB", zap.Error(err))
+	}
+	defer sqlDB.Close()
+
+	migrator := migrations.NewMigrator(db, appLogger)
+	if err := migrator.Run(); err != nil {
+		appLogger.Fatal("Failed to run migrations", zap.Error(err))
 	}
 
 	bot, err := tgbotapi.NewBotAPI(cfg.TelegramBotToken)
 	if err != nil {
-		logger.Fatal("Failed to initialize bot", zap.Error(err))
+		appLogger.Fatal("Failed to initialize bot", zap.Error(err))
 	}
 
-	logger.Info("Bot authorized", zap.String("username", bot.Self.UserName))
+	appLogger.Info("Bot authorized", zap.String("username", bot.Self.UserName))
 
 	repo := repository.NewRepository(db)
 
 	usecases := usecases.NewUsecases(repo)
 
-	handler := handlers.NewBotHandler(bot, usecases, logger)
+	handler := handlers.NewBotHandler(bot, usecases, appLogger)
 
-	sched := scheduler.NewScheduler(repo.Reminder, usecases.ReminderExecution, usecases.Reminder, handler, logger)
+	sched := scheduler.NewScheduler(repo.Reminder, usecases.ReminderExecution, usecases.Reminder, handler, appLogger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -73,7 +78,7 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	logger.Info("Bot is running. Press Ctrl+C to stop.")
+	appLogger.Info("Bot is running. Press Ctrl+C to stop.")
 
 	for {
 		select {
@@ -84,7 +89,7 @@ func main() {
 				handler.HandleUpdate(ctx, update)
 			}
 		case <-sigChan:
-			logger.Info("Shutting down...")
+			appLogger.Info("Shutting down...")
 			cancel()
 			time.Sleep(2 * time.Second)
 			return
@@ -110,38 +115,34 @@ func initLogger(level string) *zap.Logger {
 	return logger
 }
 
-func connectDatabase(dsn string, logger *zap.Logger) (*sqlx.DB, error) {
-	db, err := sqlx.Connect("postgres", dsn)
+func connectDatabase(dsn string, logLevel string, appLogger *zap.Logger) (*gorm.DB, error) {
+	var gormLogger logger.Interface
+	if logLevel == "development" || logLevel == "debug" {
+		gormLogger = logger.Default.LogMode(logger.Info)
+	} else {
+		gormLogger = logger.Default.LogMode(logger.Error)
+	}
+
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: gormLogger,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sql.DB: %w", err)
+	}
 
-	if err := db.Ping(); err != nil {
+	sqlDB.SetMaxOpenConns(25)
+	sqlDB.SetMaxIdleConns(5)
+	sqlDB.SetConnMaxLifetime(5 * time.Minute)
+
+	if err := sqlDB.Ping(); err != nil {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	logger.Info("Database connection established")
+	appLogger.Info("Database connection established")
 	return db, nil
-}
-
-func runMigrations(url string, logger *zap.Logger) error {
-	m, err := migrate.New(
-		"file://migrations",
-		url,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create migrate instance: %w", err)
-	}
-	defer m.Close()
-
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-		return fmt.Errorf("failed to run migrations: %w", err)
-	}
-
-	logger.Info("Migrations completed")
-	return nil
 }

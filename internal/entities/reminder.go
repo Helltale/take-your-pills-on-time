@@ -16,19 +16,19 @@ const (
 )
 
 type Reminder struct {
-	ID            uuid.UUID    `db:"id" json:"id"`
-	UserID        uuid.UUID    `db:"user_id" json:"user_id"`
-	Title         string       `db:"title" json:"title"`
-	Comment       *string      `db:"comment" json:"comment"`
-	ImageURL      *string      `db:"image_url" json:"image_url"`
-	Type          ReminderType `db:"type" json:"type"`
-	IntervalHours *int         `db:"interval_hours" json:"interval_hours"`
-	TimeOfDay     *string      `db:"time_of_day" json:"time_of_day"`
-	IsActive      bool         `db:"is_active" json:"is_active"`
-	LastSentAt    *time.Time   `db:"last_sent_at" json:"last_sent_at"`
-	NextSendAt    *time.Time   `db:"next_send_at" json:"next_send_at"`
-	CreatedAt     time.Time    `db:"created_at" json:"created_at"`
-	UpdatedAt     time.Time    `db:"updated_at" json:"updated_at"`
+	ID            uuid.UUID    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	UserID        uuid.UUID    `gorm:"type:uuid;not null;index" json:"user_id"`
+	Title         string       `gorm:"size:255;not null" json:"title"`
+	Comment       *string      `gorm:"type:text" json:"comment"`
+	ImageURL      *string      `gorm:"type:text" json:"image_url"`
+	Type          ReminderType `gorm:"type:varchar(50);not null;index" json:"type"`
+	IntervalHours *int         `json:"interval_hours"`
+	TimeOfDay     *string      `gorm:"size:5" json:"time_of_day"`
+	IsActive      bool         `gorm:"default:true;not null;index" json:"is_active"`
+	LastSentAt    *time.Time   `json:"last_sent_at"`
+	NextSendAt    *time.Time   `gorm:"index" json:"next_send_at"`
+	CreatedAt     time.Time    `json:"created_at"`
+	UpdatedAt     time.Time    `json:"updated_at"`
 }
 
 func (Reminder) TableName() string {

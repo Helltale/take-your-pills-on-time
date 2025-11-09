@@ -1,6 +1,6 @@
 package repository
 
-import "github.com/jmoiron/sqlx"
+import "gorm.io/gorm"
 
 type Repository struct {
 	User              UserRepository
@@ -8,7 +8,7 @@ type Repository struct {
 	ReminderExecution ReminderExecutionRepository
 }
 
-func NewRepository(db *sqlx.DB) *Repository {
+func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{
 		User:              NewUserRepository(db),
 		Reminder:          NewReminderRepository(db),
