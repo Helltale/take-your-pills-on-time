@@ -46,7 +46,18 @@ cp .env.example .env
 TELEGRAM_BOT_TOKEN=your_actual_bot_token_here
 ```
 
-3. Запустите приложение через Docker Compose:
+3. Запустите приложение (рекомендуется использовать Makefile):
+```bash
+make run
+```
+
+Эта команда автоматически:
+- Запустит все юнит-тесты
+- Проверит наличие и корректность `.env` файла
+- Соберет Docker образ
+- Запустит контейнеры
+
+Альтернативно можно использовать Docker Compose напрямую:
 ```bash
 docker-compose up -d
 ```
@@ -65,6 +76,24 @@ docker-compose up -d
 - `APP_ENV` - окружение (`development` или `production`)
 - `LOG_LEVEL` - уровень логирования (`debug`, `info`, `warn`, `error`)
 
+## Makefile команды
+
+Проект включает Makefile с удобными командами для разработки и запуска:
+
+```bash
+make help              # Показать все доступные команды
+make run               # Запустить проект: тесты → сборка → запуск в Docker
+make test              # Запустить все юнит-тесты
+make test-cover        # Запустить тесты с покрытием
+make generate-mocks    # Сгенерировать моки для репозиториев
+make docker-build      # Собрать Docker образ
+make docker-up         # Запустить контейнеры
+make docker-down       # Остановить контейнеры
+make docker-logs       # Показать логи контейнеров
+make docker-restart    # Перезапустить контейнеры
+make clean             # Очистить временные файлы и остановить контейнеры
+```
+
 ## Разработка
 
 ### Генерация моков
@@ -74,9 +103,22 @@ docker-compose up -d
 Для генерации моков выполните:
 
 ```bash
+make generate-mocks
+```
+
+или вручную:
+
+```bash
 export PATH=$PATH:$HOME/go/bin
 go generate ./internal/repository/...
 ```
+
 Моки генерируются в директории `internal/repository/mocks/` и используются в юнит-тестах use cases.
 
 ### Тестирование
+
+Запуск тестов:
+
+```bash
+make test
+```
