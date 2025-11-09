@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: pills_bot_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: pills_bot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pills_bot_app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: pills_bot
+      DB_SSLMODE: disable
+      APP_ENV: production
+      LOG_LEVEL: info
+    env_file:
+      - .env
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
